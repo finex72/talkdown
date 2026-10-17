@@ -1,0 +1,4 @@
+pycaw
+keyboard
+pygame
+comtypes
