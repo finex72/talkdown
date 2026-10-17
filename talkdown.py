@@ -1,13 +1,12 @@
 """TalkDown
 
-Senkt die Lautstärke von Spotify, solange die Push-to-Talk-Taste (Joystick-Knopf oder
-Tastaturtaste) gedrückt ist oder ein überwachtes Programm (z.B. vPilot) Ton ausgibt,
-und blendet sie danach wieder sanft ein.
+Lowers Spotify's volume while the push-to-talk button (joystick button or keyboard key)
+is held or while a watched program (e.g. vPilot) plays audio, then fades it back in.
 
-Beim ersten Start wird die PTT-Taste automatisch abgefragt. Einstellungen werden unter
-%APPDATA%\\TalkDown\\config.json gespeichert.
+On first launch the PTT button is detected automatically. Settings are stored in
+%APPDATA%\\TalkDown\\config.json.
 
-Kein offizielles Produkt von Spotify oder vPilot.
+Not affiliated with Spotify or vPilot.
 """
 import ctypes
 import json
@@ -31,23 +30,23 @@ from pycaw.pycaw import AudioUtilities
 APP_NAME = "TalkDown"
 APPDATA = os.environ.get("APPDATA", os.path.expanduser("~"))
 CONFIG_DIR = os.path.join(APPDATA, "TalkDown")
-LEGACY_CONFIG_PATH = os.path.join(APPDATA, "SpotifyPTTDucker", "config.json")  # Vorgängername (v1.0.0)
+LEGACY_CONFIG_PATH = os.path.join(APPDATA, "SpotifyPTTDucker", "config.json")  # previous name (v1.0.0)
 LEGACY_APP_NAME = "Spotify PTT Ducker"
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 DEFAULTS = {
     "binding": None,            # {"type": "joystick", "name": str, "button": int} | {"type": "keyboard", "key": str}
-    "duck_level": 15.0,         # Prozent der normalen Lautstärke während Ducking
-    "fade_out": 0.15,           # Sekunden bis abgesenkt
-    "fade_in": 1.5,             # Sekunden für das Wiederaufblenden
-    "watch_enabled": True,      # Ton anderer Programme überwachen
-    "watch_processes": "vpilot.exe",  # kommagetrennt
-    "watch_threshold": 0.01,    # Pegel (0..1), ab dem "Ton wird ausgegeben" gilt
-    "watch_hold": 0.8,          # Nachlaufzeit in Sekunden
+    "duck_level": 15.0,         # percent of normal volume while ducking
+    "fade_out": 0.15,           # seconds until fully lowered
+    "fade_in": 1.5,             # seconds for the fade-in
+    "watch_enabled": True,      # watch audio of other programs
+    "watch_processes": "vpilot.exe",  # comma-separated
+    "watch_threshold": 0.01,    # level (0..1) above which audio counts as playing
+    "watch_hold": 0.8,          # hold time in seconds
     "duck_process": "spotify.exe",
     "windows_autostart": False,
-    "auto_activate": True,      # beim Programmstart sofort aktivieren
+    "auto_activate": True,      # activate immediately on launch
 }
 
 
@@ -97,15 +96,15 @@ def set_windows_autostart(enabled):
 
 def describe_binding(b):
     if not b:
-        return "nicht festgelegt"
+        return "not set"
     if b["type"] == "joystick":
-        return f"Joystick „{b['name']}“, Knopf {b['button']}"
-    return f"Taste „{b['key']}“"
+        return f"Joystick \"{b['name']}\", button {b['button']}"
+    return f"Key \"{b['key']}\""
 
 
-# ---------------------------------------------------------------- Knopf-Erkennung
+# ---------------------------------------------------------------- Button detection
 def capture_binding(cancel):
-    """Wartet auf den ersten Joystick-Knopf oder die erste Taste. Gibt Binding oder None zurück."""
+    """Waits for the first joystick button or key press. Returns the binding, or None if cancelled."""
     pygame.init()
     pygame.joystick.init()
     sticks = {}
@@ -144,7 +143,7 @@ class Engine:
         self.info = ""
         self.running = False
 
-    # -- Lebenszyklus
+    # -- Lifecycle
     def start(self):
         if self.running or not self.cfg["binding"]:
             return
@@ -167,7 +166,7 @@ class Engine:
         self.running = False
         self.info = ""
 
-    # -- Hilfen
+    # -- Helpers
     def _sessions(self, names):
         return [s for s in AudioUtilities.GetAllSessions()
                 if s.Process and s.Process.name().lower() in names]
@@ -175,7 +174,7 @@ class Engine:
     def _spotify_volumes(self):
         return [s.SimpleAudioVolume for s in self._sessions({self.cfg["duck_process"].lower()})]
 
-    # -- Lautstärke-Regelung
+    # -- Volume control
     def _worker(self):
         comtypes.CoInitialize()
         factor, base, last = 1.0, {}, time.perf_counter()
@@ -190,7 +189,7 @@ class Engine:
                     continue
                 try:
                     vols = self._spotify_volumes()
-                    if factor >= 1.0:  # Beginn des Duckings: aktuelle Lautstärke merken
+                    if factor >= 1.0:  # start of ducking: remember current volume
                         base = {i: v.GetMasterVolume() for i, v in enumerate(vols)}
                     span = max(0.01, 1.0 - level)
                     if target < factor:
@@ -199,10 +198,10 @@ class Engine:
                         factor = min(target, factor + span * dt / max(0.01, c["fade_in"]))
                     for i, v in enumerate(vols):
                         v.SetMasterVolume(min(1.0, base.get(i, 1.0) * factor), None)
-                except Exception:  # Spotify evtl. geschlossen/neu gestartet
+                except Exception:  # Spotify may have been closed/restarted
                     factor = target
         finally:
-            if factor < 1.0:  # beim Beenden Lautstärke wiederherstellen
+            if factor < 1.0:  # restore volume on exit
                 try:
                     for i, v in enumerate(self._spotify_volumes()):
                         v.SetMasterVolume(min(1.0, base.get(i, 1.0)), None)
@@ -210,7 +209,7 @@ class Engine:
                     pass
             comtypes.CoUninitialize()
 
-    # -- Überwachung anderer Programme (z.B. vPilot)
+    # -- Watching other programs (e.g. vPilot)
     def _watcher(self):
         comtypes.CoInitialize()
         meters, refreshed, last_loud = [], 0.0, 0.0
@@ -222,7 +221,7 @@ class Engine:
                     continue
                 now = time.perf_counter()
                 try:
-                    if now - refreshed > 2.0:  # Sessions gelegentlich neu einlesen
+                    if now - refreshed > 2.0:  # re-read sessions occasionally
                         names = {n.strip().lower() for n in c["watch_processes"].split(",") if n.strip()}
                         meters = [s._ctl.QueryInterface(IAudioMeterInformation) for s in self._sessions(names)]
                         refreshed = now
@@ -235,7 +234,7 @@ class Engine:
             self.watch = False
             comtypes.CoUninitialize()
 
-    # -- PTT-Eingabe
+    # -- PTT input
     def _input(self):
         b = self.cfg["binding"]
         try:
@@ -251,7 +250,7 @@ class Engine:
             if (e.name or "").lower() == key:
                 self.ptt = e.event_type == "down"
         hook = keyboard.hook(cb)
-        self.info = f"Taste „{key}“ aktiv"
+        self.info = f"Key \"{key}\" active"
         self.stop_event.wait()
         keyboard.unhook(hook)
 
@@ -269,14 +268,14 @@ class Engine:
                             joy = j
                             break
                     if joy is None:
-                        self.info = f"Suche Joystick „{b['name']}“ …"
+                        self.info = f"Looking for joystick \"{b['name']}\" …"
                         self.stop_event.wait(2.0)
                         continue
-                    self.info = f"Joystick verbunden: {b['name']}"
+                    self.info = f"Joystick connected: {b['name']}"
                 try:
                     pygame.event.pump()
                     self.ptt = bool(joy.get_button(b["button"]))
-                except Exception:  # Joystick abgezogen
+                except Exception:  # joystick unplugged
                     joy, self.ptt = None, False
                     continue
                 self.stop_event.wait(0.01)
@@ -284,7 +283,7 @@ class Engine:
             pygame.quit()
 
 
-# ---------------------------------------------------------------- Oberfläche
+# ---------------------------------------------------------------- User interface
 class App:
     def __init__(self, root, cfg, minimized):
         self.root, self.cfg = root, cfg
@@ -302,39 +301,39 @@ class App:
         top.grid(row=0, column=0, sticky="ew")
         self.status = ttk.Label(top, text="", font=("Segoe UI", 11, "bold"))
         self.status.grid(row=0, column=0, sticky="w")
-        self.toggle_btn = ttk.Button(top, text="Starten", width=12, command=self.toggle)
+        self.toggle_btn = ttk.Button(top, text="Start", width=12, command=self.toggle)
         self.toggle_btn.grid(row=0, column=1, padx=(20, 0))
         top.columnconfigure(0, weight=1)
         self.detail = ttk.Label(main, text="", foreground="#666")
         self.detail.grid(row=1, column=0, sticky="w", pady=(2, 10))
 
-        # PTT-Taste
-        box = ttk.LabelFrame(main, text="Push-to-Talk-Taste", padding=10)
+        # PTT button
+        box = ttk.LabelFrame(main, text="Push-to-talk button", padding=10)
         box.grid(row=2, column=0, sticky="ew")
         self.bind_label = ttk.Label(box, text="")
         self.bind_label.grid(row=0, column=0, sticky="w")
-        ttk.Button(box, text="Neu belegen …", command=self.rebind).grid(row=0, column=1, padx=(20, 0))
+        ttk.Button(box, text="Change …", command=self.rebind).grid(row=0, column=1, padx=(20, 0))
         box.columnconfigure(0, weight=1)
 
-        # Einstellungen
-        s = ttk.LabelFrame(main, text="Einstellungen", padding=10)
+        # Settings
+        s = ttk.LabelFrame(main, text="Settings", padding=10)
         s.grid(row=3, column=0, sticky="ew", pady=(10, 0))
         s.columnconfigure(1, weight=1)
-        self.slider(s, 0, "Lautstärke beim Sprechen", "duck_level", 0, 100, "{:.0f} %")
-        self.slider(s, 1, "Absenken dauert", "fade_out", 0.05, 2.0, "{:.2f} s")
-        self.slider(s, 2, "Fade-In dauert", "fade_in", 0.2, 5.0, "{:.1f} s")
+        self.slider(s, 0, "Volume while talking", "duck_level", 0, 100, "{:.0f} %")
+        self.slider(s, 1, "Fade-out time", "fade_out", 0.05, 2.0, "{:.2f} s")
+        self.slider(s, 2, "Fade-in time", "fade_in", 0.2, 5.0, "{:.1f} s")
 
-        self.check(s, 3, "Ton anderer Programme überwachen (z. B. vPilot)", "watch_enabled")
-        ttk.Label(s, text="Programme:").grid(row=4, column=0, sticky="w", padx=(18, 0))
+        self.check(s, 3, "Duck when other programs play audio (e.g. vPilot)", "watch_enabled")
+        ttk.Label(s, text="Programs:").grid(row=4, column=0, sticky="w", padx=(18, 0))
         self.proc_var = tk.StringVar(value=cfg["watch_processes"])
         self.proc_var.trace_add("write", lambda *_: self.set("watch_processes", self.proc_var.get()))
         ttk.Entry(s, textvariable=self.proc_var, width=28).grid(row=4, column=1, columnspan=2, sticky="ew", pady=2)
-        self.slider(s, 5, "Empfindlichkeit (Schwelle)", "watch_threshold", 0.001, 0.2, "{:.3f}", pad=18)
-        self.slider(s, 6, "Nachlaufzeit", "watch_hold", 0.0, 3.0, "{:.1f} s", pad=18)
+        self.slider(s, 5, "Sensitivity (threshold)", "watch_threshold", 0.001, 0.2, "{:.3f}", pad=18)
+        self.slider(s, 6, "Hold time", "watch_hold", 0.0, 3.0, "{:.1f} s", pad=18)
 
         ttk.Separator(s).grid(row=7, column=0, columnspan=3, sticky="ew", pady=8)
-        self.check(s, 8, "Beim Programmstart sofort aktivieren", "auto_activate")
-        self.check(s, 9, "Mit Windows starten", "windows_autostart",
+        self.check(s, 8, "Activate automatically on launch", "auto_activate")
+        self.check(s, 9, "Start with Windows", "windows_autostart",
                    extra=lambda: set_windows_autostart(self.cfg["windows_autostart"]))
 
         self.refresh_binding()
@@ -343,11 +342,11 @@ class App:
         if minimized:
             root.iconify()
         if not cfg["binding"]:
-            root.after(300, lambda: self.rebind(then_start=True))  # Ersteinrichtung
+            root.after(300, lambda: self.rebind(then_start=True))  # first-run setup
         elif cfg["auto_activate"]:
             self.start()
 
-    # -- Bausteine
+    # -- Building blocks
     def slider(self, parent, row, text, key, lo, hi, fmt, pad=0):
         ttk.Label(parent, text=text).grid(row=row, column=0, sticky="w", padx=(pad, 10))
         val = ttk.Label(parent, text=fmt.format(self.cfg[key]), width=8, anchor="e")
@@ -381,7 +380,7 @@ class App:
     def refresh_binding(self):
         self.bind_label.config(text=describe_binding(self.cfg["binding"]))
 
-    # -- Steuerung
+    # -- Controls
     def start(self):
         if not self.cfg["binding"]:
             self.rebind(then_start=True)
@@ -398,13 +397,13 @@ class App:
         was_running = self.engine.running
         self.engine.stop()
         dlg = tk.Toplevel(self.root)
-        dlg.title("Push-to-Talk festlegen")
+        dlg.title("Set push-to-talk")
         dlg.transient(self.root)
         dlg.resizable(False, False)
         f = ttk.Frame(dlg, padding=20)
         f.grid()
-        ttk.Label(f, text="Drücke jetzt den Joystick-Knopf (oder die Taste),\n"
-                          "die du als Push-to-Talk nutzen möchtest …",
+        ttk.Label(f, text="Press the joystick button (or key)\n"
+                          "you want to use as push-to-talk …",
                   justify="center", font=("Segoe UI", 11)).grid(pady=(0, 14))
         cancel = threading.Event()
         result = []
@@ -428,7 +427,7 @@ class App:
             else:
                 self.root.after(50, poll)
 
-        ttk.Button(f, text="Abbrechen", command=abort).grid()
+        ttk.Button(f, text="Cancel", command=abort).grid()
         dlg.protocol("WM_DELETE_WINDOW", abort)
         dlg.grab_set()
         poll()
@@ -437,13 +436,13 @@ class App:
         e = self.engine
         if e.running:
             ducking = e.ptt or e.watch
-            self.status.config(text="● Spotify wird gesenkt" if ducking else "● Aktiv",
+            self.status.config(text="● Spotify lowered" if ducking else "● Active",
                                foreground="#c47a00" if ducking else "#1a8f3c")
-            self.toggle_btn.config(text="Stoppen")
+            self.toggle_btn.config(text="Stop")
             self.detail.config(text=e.info)
         else:
-            self.status.config(text="○ Gestoppt", foreground="#888")
-            self.toggle_btn.config(text="Starten")
+            self.status.config(text="○ Stopped", foreground="#888")
+            self.toggle_btn.config(text="Start")
             self.detail.config(text="")
         self.root.after(100, self.tick)
 
@@ -455,7 +454,7 @@ class App:
 
 # ---------------------------------------------------------------- Start
 def selftest(outfile):
-    """Prüft für den gebauten .exe-Test, ob alle Teile laden (kein Fenster)."""
+    """Checks that all parts load in the built exe (no window)."""
     lines = []
     try:
         comtypes.CoInitialize()
@@ -468,7 +467,7 @@ def selftest(outfile):
         pygame.quit()
         lines.append("OK")
     except Exception as e:  # noqa: BLE001
-        lines.append(f"FEHLER: {e!r}")
+        lines.append(f"ERROR: {e!r}")
     with open(outfile, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
@@ -477,10 +476,10 @@ def main():
     if "--selftest" in sys.argv:
         selftest(sys.argv[sys.argv.index("--selftest") + 1])
         return
-    # Nur eine Instanz erlaubt (sonst würde doppelt gesenkt)
+    # allow only one instance (otherwise volume would be lowered twice)
     mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "TalkDown_SingleInstance")
     if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-        ctypes.windll.user32.MessageBoxW(0, "TalkDown läuft bereits.", APP_NAME, 0x40)
+        ctypes.windll.user32.MessageBoxW(0, "TalkDown is already running.", APP_NAME, 0x40)
         return
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
