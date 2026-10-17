@@ -1,11 +1,11 @@
-"""Spotify PTT Ducker
+"""TalkDown
 
 Senkt die Lautstärke von Spotify, solange die Push-to-Talk-Taste (Joystick-Knopf oder
 Tastaturtaste) gedrückt ist oder ein überwachtes Programm (z.B. vPilot) Ton ausgibt,
 und blendet sie danach wieder sanft ein.
 
 Beim ersten Start wird die PTT-Taste automatisch abgefragt. Einstellungen werden unter
-%APPDATA%\\SpotifyPTTDucker\\config.json gespeichert.
+%APPDATA%\\TalkDown\\config.json gespeichert.
 
 Kein offizielles Produkt von Spotify oder vPilot.
 """
@@ -28,8 +28,11 @@ import pygame
 from pycaw.api.endpointvolume import IAudioMeterInformation
 from pycaw.pycaw import AudioUtilities
 
-APP_NAME = "Spotify PTT Ducker"
-CONFIG_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SpotifyPTTDucker")
+APP_NAME = "TalkDown"
+APPDATA = os.environ.get("APPDATA", os.path.expanduser("~"))
+CONFIG_DIR = os.path.join(APPDATA, "TalkDown")
+LEGACY_CONFIG_PATH = os.path.join(APPDATA, "SpotifyPTTDucker", "config.json")  # Vorgängername (v1.0.0)
+LEGACY_APP_NAME = "Spotify PTT Ducker"
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
@@ -51,8 +54,9 @@ DEFAULTS = {
 # ---------------------------------------------------------------- Konfiguration
 def load_config():
     cfg = dict(DEFAULTS)
+    path = CONFIG_PATH if os.path.exists(CONFIG_PATH) else LEGACY_CONFIG_PATH
     try:
-        with open(CONFIG_PATH, encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             cfg.update({k: v for k, v in json.load(f).items() if k in DEFAULTS})
     except (OSError, ValueError):
         pass
@@ -76,6 +80,10 @@ def set_windows_autostart(enabled):
         cmd = f'"{pyw}" "{os.path.abspath(__file__)}" --minimized'
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
+            try:
+                winreg.DeleteValue(k, LEGACY_APP_NAME)
+            except FileNotFoundError:
+                pass
             if enabled:
                 winreg.SetValueEx(k, APP_NAME, 0, winreg.REG_SZ, cmd)
             else:
@@ -470,9 +478,9 @@ def main():
         selftest(sys.argv[sys.argv.index("--selftest") + 1])
         return
     # Nur eine Instanz erlaubt (sonst würde doppelt gesenkt)
-    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "SpotifyPTTDucker_SingleInstance")
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "TalkDown_SingleInstance")
     if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-        ctypes.windll.user32.MessageBoxW(0, "Spotify PTT Ducker läuft bereits.", APP_NAME, 0x40)
+        ctypes.windll.user32.MessageBoxW(0, "TalkDown läuft bereits.", APP_NAME, 0x40)
         return
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)

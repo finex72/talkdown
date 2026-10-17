@@ -1,6 +1,6 @@
-# Spotify PTT Ducker
+# TalkDown
 
-Automatically lowers Spotify's volume while you talk – and fades it back in afterwards.
+TalkDown automatically lowers Spotify's volume while you talk – and fades it back in afterwards.
 Built for flight simulation (VATSIM / vPilot) but works for any voice chat.
 
 *Deutsch: Senkt die Spotify-Lautstärke, solange du die Push-to-Talk-Taste hältst oder in
@@ -18,34 +18,22 @@ vPilot Funkverkehr zu hören ist, und blendet sie danach sanft wieder ein.*
 
 ## Download & use
 
-1. Download `SpotifyPTTDucker.exe` from the [Releases](../../releases) page.
+1. Download `TalkDown.exe` from the [Releases](../../releases) page.
 2. Start it. On first launch, press the button you want to use as push-to-talk.
 3. Play something in the **Spotify desktop app** and talk.
 
-Settings are stored in `%APPDATA%\SpotifyPTTDucker\config.json`.
+Settings are stored in `%APPDATA%\TalkDown\config.json`.
 
 > **Windows SmartScreen / antivirus:** the exe is not code-signed, so Windows may show
 > "Windows protected your PC" – click *More info → Run anyway*. Some antivirus tools
 > flag programs that listen for global key presses (this one does, to detect your PTT key)
 > or that are packed with PyInstaller. The full source is in this repository, and every
-> release lists a SHA-256 checksum so you can verify the download. You can also build the
-> exe yourself (see below).
+> release lists a SHA-256 checksum so you can verify the download.
 
 ## Requirements
 
 - Windows 10/11 (64-bit)
 - Spotify **desktop app** (the web player does not get its own entry in the Windows mixer)
-
-## Run / build from source
-
-```
-pip install -r requirements.txt
-python spotify_ptt_ducker.py
-```
-
-Build the single-file exe: run `build.bat` (needs `pip install -r requirements-dev.txt`).
-
-`tools/find_joystick_button.py` prints the number of any joystick button you press (for debugging).
 
 ## Limitations
 
