@@ -1,6 +1,6 @@
 """TalkDown
 
-Lowers Spotify's volume while the push-to-talk button (joystick button or keyboard key)
+Lowers the volume of a chosen app (default: Spotify) while the push-to-talk button (joystick button or keyboard key)
 is held or while a watched program (e.g. vPilot) plays audio, then fades it back in.
 
 On first launch the PTT button is detected automatically. Settings are stored in
@@ -171,8 +171,11 @@ class Engine:
         return [s for s in AudioUtilities.GetAllSessions()
                 if s.Process and s.Process.name().lower() in names]
 
-    def _spotify_volumes(self):
-        return [s.SimpleAudioVolume for s in self._sessions({self.cfg["duck_process"].lower()})]
+    def _duck_names(self):
+        return {n.strip().lower() for n in self.cfg["duck_process"].split(",") if n.strip()}
+
+    def _duck_volumes(self):
+        return [s.SimpleAudioVolume for s in self._sessions(self._duck_names())]
 
     # -- Volume control
     def _worker(self):
@@ -188,7 +191,7 @@ class Engine:
                 if factor == target:
                     continue
                 try:
-                    vols = self._spotify_volumes()
+                    vols = self._duck_volumes()
                     if factor >= 1.0:  # start of ducking: remember current volume
                         base = {i: v.GetMasterVolume() for i, v in enumerate(vols)}
                     span = max(0.01, 1.0 - level)
@@ -198,12 +201,12 @@ class Engine:
                         factor = min(target, factor + span * dt / max(0.01, c["fade_in"]))
                     for i, v in enumerate(vols):
                         v.SetMasterVolume(min(1.0, base.get(i, 1.0) * factor), None)
-                except Exception:  # Spotify may have been closed/restarted
+                except Exception:  # the ducked app may have been closed/restarted
                     factor = target
         finally:
             if factor < 1.0:  # restore volume on exit
                 try:
-                    for i, v in enumerate(self._spotify_volumes()):
+                    for i, v in enumerate(self._duck_volumes()):
                         v.SetMasterVolume(min(1.0, base.get(i, 1.0)), None)
                 except Exception:
                     pass
@@ -319,21 +322,27 @@ class App:
         s = ttk.LabelFrame(main, text="Settings", padding=10)
         s.grid(row=3, column=0, sticky="ew", pady=(10, 0))
         s.columnconfigure(1, weight=1)
-        self.slider(s, 0, "Volume while talking", "duck_level", 0, 100, "{:.0f} %")
-        self.slider(s, 1, "Fade-out time", "fade_out", 0.05, 2.0, "{:.2f} s")
-        self.slider(s, 2, "Fade-in time", "fade_in", 0.2, 5.0, "{:.1f} s")
+        ttk.Label(s, text="App to lower:").grid(row=0, column=0, sticky="w", padx=(0, 10))
+        self.duck_var = tk.StringVar(value=cfg["duck_process"])
+        self.duck_var.trace_add("write", lambda *_: self.set("duck_process", self.duck_var.get()))
+        self.duck_box = ttk.Combobox(s, textvariable=self.duck_var, width=28,
+                                     postcommand=self.refresh_duck_choices)
+        self.duck_box.grid(row=0, column=1, columnspan=2, sticky="ew", pady=2)
+        self.slider(s, 1, "Volume while talking", "duck_level", 0, 100, "{:.0f} %")
+        self.slider(s, 2, "Fade-out time", "fade_out", 0.05, 2.0, "{:.2f} s")
+        self.slider(s, 3, "Fade-in time", "fade_in", 0.2, 5.0, "{:.1f} s")
 
-        self.check(s, 3, "Duck when other programs play audio (e.g. vPilot)", "watch_enabled")
-        ttk.Label(s, text="Programs:").grid(row=4, column=0, sticky="w", padx=(18, 0))
+        self.check(s, 4, "Duck when other programs play audio (e.g. vPilot)", "watch_enabled")
+        ttk.Label(s, text="Programs:").grid(row=5, column=0, sticky="w", padx=(18, 0))
         self.proc_var = tk.StringVar(value=cfg["watch_processes"])
         self.proc_var.trace_add("write", lambda *_: self.set("watch_processes", self.proc_var.get()))
-        ttk.Entry(s, textvariable=self.proc_var, width=28).grid(row=4, column=1, columnspan=2, sticky="ew", pady=2)
-        self.slider(s, 5, "Sensitivity (threshold)", "watch_threshold", 0.001, 0.2, "{:.3f}", pad=18)
-        self.slider(s, 6, "Hold time", "watch_hold", 0.0, 3.0, "{:.1f} s", pad=18)
+        ttk.Entry(s, textvariable=self.proc_var, width=28).grid(row=5, column=1, columnspan=2, sticky="ew", pady=2)
+        self.slider(s, 6, "Sensitivity (threshold)", "watch_threshold", 0.001, 0.2, "{:.3f}", pad=18)
+        self.slider(s, 7, "Hold time", "watch_hold", 0.0, 3.0, "{:.1f} s", pad=18)
 
-        ttk.Separator(s).grid(row=7, column=0, columnspan=3, sticky="ew", pady=8)
-        self.check(s, 8, "Activate automatically on launch", "auto_activate")
-        self.check(s, 9, "Start with Windows", "windows_autostart",
+        ttk.Separator(s).grid(row=8, column=0, columnspan=3, sticky="ew", pady=8)
+        self.check(s, 9, "Activate automatically on launch", "auto_activate")
+        self.check(s, 10, "Start with Windows", "windows_autostart",
                    extra=lambda: set_windows_autostart(self.cfg["windows_autostart"]))
 
         self.refresh_binding()
@@ -376,6 +385,14 @@ class App:
         if self.save_job:
             self.root.after_cancel(self.save_job)
         self.save_job = self.root.after(400, lambda: save_config(self.cfg))
+
+    def refresh_duck_choices(self):
+        """Fills the dropdown with programs that currently have an audio session."""
+        try:
+            names = {s.Process.name() for s in AudioUtilities.GetAllSessions() if s.Process}
+        except Exception:
+            names = set()
+        self.duck_box["values"] = sorted(names, key=str.lower)
 
     def refresh_binding(self):
         self.bind_label.config(text=describe_binding(self.cfg["binding"]))
@@ -436,7 +453,7 @@ class App:
         e = self.engine
         if e.running:
             ducking = e.ptt or e.watch
-            self.status.config(text="● Spotify lowered" if ducking else "● Active",
+            self.status.config(text="● Volume lowered" if ducking else "● Active",
                                foreground="#c47a00" if ducking else "#1a8f3c")
             self.toggle_btn.config(text="Stop")
             self.detail.config(text=e.info)
@@ -459,7 +476,7 @@ def selftest(outfile):
     try:
         comtypes.CoInitialize()
         eng = Engine(dict(DEFAULTS))
-        lines.append(f"spotify sessions: {len(eng._spotify_volumes())}")
+        lines.append(f"duck sessions: {len(eng._duck_volumes())}")
         lines.append(f"vpilot meters: {[s._ctl.QueryInterface(IAudioMeterInformation).GetPeakValue() for s in eng._sessions({'vpilot.exe'})]}")
         pygame.init()
         pygame.joystick.init()
