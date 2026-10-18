@@ -336,7 +336,11 @@ class App:
         ttk.Label(s, text="Programs:").grid(row=5, column=0, sticky="w", padx=(18, 0))
         self.proc_var = tk.StringVar(value=cfg["watch_processes"])
         self.proc_var.trace_add("write", lambda *_: self.set("watch_processes", self.proc_var.get()))
-        ttk.Entry(s, textvariable=self.proc_var, width=28).grid(row=5, column=1, columnspan=2, sticky="ew", pady=2)
+        self.proc_box = ttk.Combobox(s, textvariable=self.proc_var, width=28,
+                                     postcommand=self.refresh_watch_choices)
+        self.proc_box.grid(row=5, column=1, columnspan=2, sticky="ew", pady=2)
+        self.proc_box.bind("<<ComboboxSelected>>", self.watch_selected)
+        self.proc_before = cfg["watch_processes"]
         self.slider(s, 6, "Sensitivity (threshold)", "watch_threshold", 0.001, 0.2, "{:.3f}", pad=18)
         self.slider(s, 7, "Hold time", "watch_hold", 0.0, 3.0, "{:.1f} s", pad=18)
 
@@ -386,13 +390,29 @@ class App:
             self.root.after_cancel(self.save_job)
         self.save_job = self.root.after(400, lambda: save_config(self.cfg))
 
-    def refresh_duck_choices(self):
-        """Fills the dropdown with programs that currently have an audio session."""
+    @staticmethod
+    def running_audio_programs():
+        """Names of programs that currently have an audio session."""
         try:
             names = {s.Process.name() for s in AudioUtilities.GetAllSessions() if s.Process}
         except Exception:
             names = set()
-        self.duck_box["values"] = sorted(names, key=str.lower)
+        return sorted(names, key=str.lower)
+
+    def refresh_duck_choices(self):
+        self.duck_box["values"] = self.running_audio_programs()
+
+    def refresh_watch_choices(self):
+        self.proc_before = self.proc_var.get()  # text before the pick, so the choice can be appended
+        self.proc_box["values"] = self.running_audio_programs()
+
+    def watch_selected(self, _event=None):
+        """Appends the picked program to the comma-separated list instead of replacing it."""
+        picked = self.proc_var.get()
+        current = [n.strip() for n in self.proc_before.split(",") if n.strip()]
+        if picked.lower() not in (n.lower() for n in current):
+            current.append(picked)
+        self.proc_var.set(", ".join(current))
 
     def refresh_binding(self):
         self.bind_label.config(text=describe_binding(self.cfg["binding"]))
